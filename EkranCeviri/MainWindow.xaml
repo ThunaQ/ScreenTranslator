@@ -1,0 +1,24 @@
+﻿<Window x:Class="EkranCeviri.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Ekran Çevirici" Height="450" Width="800"
+        ShowInTaskbar="False" 
+        WindowStyle="None" 
+        AllowsTransparency="True" 
+        Background="#80000000" 
+        Topmost="True"
+        Cursor="Cross"
+        Loaded="Window_Loaded">
+    <Canvas x:Name="CizimAlani" 
+            Background="Transparent"
+            MouseLeftButtonDown="CizimAlani_MouseLeftButtonDown"
+            MouseMove="CizimAlani_MouseMove"
+            MouseLeftButtonUp="CizimAlani_MouseLeftButtonUp">
+
+        <Rectangle x:Name="SecimKutusu" 
+                   Stroke="Red" 
+                   StrokeThickness="2" 
+                   Fill="#33FF0000" 
+                   Visibility="Collapsed"/>
+    </Canvas>
+</Window>
