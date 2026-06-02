@@ -47,10 +47,8 @@ namespace EkranCeviri
             // --- SAĞ ALT SİMGE (SYSTEM TRAY) AYARLARI ---
             tepsiSimgesi = new System.Windows.Forms.NotifyIcon();
 
-            // ESKİ KOD BUYDU: tepsiSimgesi.Icon = System.Drawing.SystemIcons.Application;
-            // YENİ KOD (Kendi ikonunun tam adını yazmalısın, örneğin "benim_ikonum.ico"):
-            tepsiSimgesi.Icon = new System.Drawing.Icon("TR.ico");
-
+            // Uygulamanın kendi gömülü ikonunu otomatik olarak çekip alır! Yanında .ico taşımana gerek kalmaz.
+            tepsiSimgesi.Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location);
             // Sağ alt simge yazısı
             tepsiSimgesi.Text = "ScreenTranslator - Running in background";
             tepsiSimgesi.Visible = true;

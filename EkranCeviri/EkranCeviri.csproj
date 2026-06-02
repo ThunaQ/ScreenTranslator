@@ -9,6 +9,12 @@
 	<UseWindowsForms>true</UseWindowsForms>
 	<PackageIcon>TR.png</PackageIcon>
 	<ApplicationIcon>TR.ico</ApplicationIcon>
+	<Authors>ScreenTranslator</Authors>
+	<Company>ScreenTranslator</Company>
+	<Product>ScreenTranslator</Product>
+	<PackageId>ScreenTranslator</PackageId>
+	<AssemblyName>ScreenTranslator</AssemblyName>
+	<RootNamespace>ScreenTranslator</RootNamespace>
   </PropertyGroup>
 
   <ItemGroup>
