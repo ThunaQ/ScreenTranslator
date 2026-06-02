@@ -1,5 +1,4 @@
 ﻿<Window x:Class="EkranCeviri.SettingsWindow"
-        Icon="TR.ico"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Settings" Height="440" Width="340" 
