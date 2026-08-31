@@ -1,0 +1,56 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restore dependencies
+        run: dotnet restore
+
+      - name: Publish
+        run: dotnet publish ScreenTranslator/ScreenTranslator.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -o ./publish
+
+      - name: Ensure tessdata language files exist
+        shell: pwsh
+        run: |
+          $tessdataPath = "./publish/tessdata"
+          New-Item -ItemType Directory -Force -Path $tessdataPath | Out-Null
+
+          $languages = @("eng", "tur", "rus", "spa", "fra", "ita", "deu")
+          foreach ($lang in $languages) {
+            $target = "$tessdataPath/$lang.traineddata"
+            if (-not (Test-Path $target)) {
+              Write-Host "Downloading missing tessdata file: $lang.traineddata"
+              Invoke-WebRequest -Uri "https://github.com/tesseract-ocr/tessdata_fast/raw/main/$lang.traineddata" -OutFile $target
+            }
+          }
+
+      - name: Create zip archive
+        shell: pwsh
+        run: |
+          $version = "${{ github.ref_name }}"
+          Compress-Archive -Path ./publish/* -DestinationPath "./ScreenTranslator_$version.zip"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ./ScreenTranslator_*.zip
+          name: ScreenTranslator ${{ github.ref_name }}
+          generate_release_notes: true
