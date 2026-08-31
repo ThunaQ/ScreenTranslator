@@ -20,5 +20,12 @@
                    StrokeThickness="2" 
                    Fill="#33FF0000" 
                    Visibility="Collapsed"/>
+
+        <Ellipse x:Name="ErrorMark"
+                 Width="36" Height="36"
+                 Stroke="Red"
+                 StrokeThickness="4"
+                 Fill="#33FF0000"
+                 Visibility="Collapsed"/>
     </Canvas>
 </Window>
