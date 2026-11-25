@@ -1,31 +1,53 @@
 ﻿<Window x:Class="ScreenTranslator.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="ScreenTranslator" Height="450" Width="800"
-        ShowInTaskbar="False" 
-        WindowStyle="None" 
-        AllowsTransparency="True" 
-        Background="#80000000" 
-        Topmost="True"
-        Cursor="Cross"
-        Loaded="Window_Loaded">
-    <Canvas x:Name="CanvasArea" 
-            Background="Transparent"
-            MouseLeftButtonDown="CanvasArea_MouseLeftButtonDown"
-            MouseMove="CanvasArea_MouseMove"
-            MouseLeftButtonUp="CanvasArea_MouseLeftButtonUp">
+        xmlns:local="clr-namespace:ScreenTranslator"
+        Title="ScreenTranslator"
+        WindowStyle="None" ResizeMode="NoResize" ShowInTaskbar="False" ShowActivated="False"
+        Topmost="True" Background="Black" Cursor="Cross"
+        WindowStartupLocation="Manual" Left="-10000" Top="-10000" Width="100" Height="100"
+        UseLayoutRounding="True" SnapsToDevicePixels="True"
+        Loaded="Window_Loaded"
+        KeyDown="Window_KeyDown"
+        Deactivated="Window_Deactivated">
 
-        <Rectangle x:Name="SelectionBox" 
-                   Stroke="Red" 
-                   StrokeThickness="2" 
-                   Fill="#33FF0000" 
-                   Visibility="Collapsed"/>
+    <Grid>
+        <!-- Frozen screenshot taken before this window appears, so the overlay can never end up in the capture -->
+        <Image x:Name="FrozenImage" Stretch="Fill" RenderOptions.BitmapScalingMode="NearestNeighbor"/>
 
-        <Ellipse x:Name="ErrorMark"
-                 Width="36" Height="36"
-                 Stroke="Red"
-                 StrokeThickness="4"
-                 Fill="#33FF0000"
-                 Visibility="Collapsed"/>
-    </Canvas>
+        <!-- Dim layer with a clear hole over the selection -->
+        <Path Fill="#99000000" IsHitTestVisible="False" HorizontalAlignment="Left" VerticalAlignment="Top">
+            <Path.Data>
+                <CombinedGeometry GeometryCombineMode="Exclude">
+                    <CombinedGeometry.Geometry1>
+                        <RectangleGeometry x:Name="DimFull" Rect="0,0,100,100"/>
+                    </CombinedGeometry.Geometry1>
+                    <CombinedGeometry.Geometry2>
+                        <RectangleGeometry x:Name="DimHole" Rect="0,0,0,0"/>
+                    </CombinedGeometry.Geometry2>
+                </CombinedGeometry>
+            </Path.Data>
+        </Path>
+
+        <Canvas x:Name="CanvasArea"
+                Background="Transparent"
+                SizeChanged="CanvasArea_SizeChanged"
+                MouseLeftButtonDown="CanvasArea_MouseLeftButtonDown"
+                MouseMove="CanvasArea_MouseMove"
+                MouseLeftButtonUp="CanvasArea_MouseLeftButtonUp"
+                MouseRightButtonDown="CanvasArea_MouseRightButtonDown">
+            <Rectangle x:Name="SelectionBox"
+                       Stroke="#F2B544"
+                       StrokeThickness="1.5"
+                       Fill="Transparent"
+                       Visibility="Collapsed"/>
+        </Canvas>
+
+        <Border x:Name="HintPill" HorizontalAlignment="Center" VerticalAlignment="Top" Margin="0,32,0,0"
+                Padding="16,8" CornerRadius="16" Background="#E61B1F26" BorderBrush="#2E343E" BorderThickness="1"
+                IsHitTestVisible="False">
+            <TextBlock FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13" Foreground="#E8EBF0"
+                       Text="{local:Loc overlay.hint}"/>
+        </Border>
+    </Grid>
 </Window>

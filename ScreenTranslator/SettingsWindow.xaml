@@ -1,54 +1,166 @@
 ﻿<Window x:Class="ScreenTranslator.SettingsWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-        Title="Settings" Height="470" Width="340" 
-        Background="#1E1E1E" WindowStartupLocation="CenterScreen" 
-        ResizeMode="NoResize" WindowStyle="ToolWindow">
+        xmlns:local="clr-namespace:ScreenTranslator"
+        Title="{local:Loc settings.window}"
+        Width="520" SizeToContent="Height" MaxHeight="760"
+        ResizeMode="NoResize" WindowStartupLocation="CenterScreen"
+        Background="{DynamicResource WindowBg}"
+        FontFamily="Segoe UI Variable Text, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" SnapsToDevicePixels="True">
 
-    <StackPanel Margin="20">
-        <TextBlock Text="⚙️ Application Settings" Foreground="White" FontSize="18" FontWeight="Bold" Margin="0,0,0,20" HorizontalAlignment="Center"/>
+    <Window.Resources>
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Theme.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Window.Resources>
 
-        <TextBlock Text="Translation Engine (API):" Foreground="#AAAAAA" Margin="0,0,0,5"/>
-        <ComboBox x:Name="CmbApi" Margin="0,0,0,15" SelectedIndex="0">
-            <ComboBoxItem Content="Google Translate (Fast)"/>
-            <ComboBoxItem Content="Yandex Translate (Better Context)"/>
-        </ComboBox>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
 
-        <TextBlock Text="Source Language:" Foreground="#AAAAAA" Margin="0,0,0,5"/>
-        <ComboBox x:Name="CmbSourceLang" Margin="0,0,0,10" SelectedIndex="0">
-            <ComboBoxItem Content="English"/>
-            <ComboBoxItem Content="Turkish"/>
-            <ComboBoxItem Content="Russian"/>
-            <ComboBoxItem Content="Spanish"/>
-            <ComboBoxItem Content="French"/>
-            <ComboBoxItem Content="Italian"/>
-            <ComboBoxItem Content="German"/>
-        </ComboBox>
+        <ScrollViewer Grid.Row="0" VerticalScrollBarVisibility="Auto">
+            <StackPanel Margin="28,26,28,20">
 
-        <CheckBox x:Name="ChkAutoDetect" Content="Auto-detect source language" Foreground="White" Margin="0,0,0,15"/>
+                <TextBlock Text="{local:Loc settings.title}" Style="{StaticResource PageTitle}"/>
+                <TextBlock Text="{local:Loc settings.subtitle}"
+                           Style="{StaticResource Hint}" Margin="0,4,0,24"/>
 
-        <TextBlock Text="Target Language:" Foreground="#AAAAAA" Margin="0,0,0,5"/>
-        <ComboBox x:Name="CmbTargetLang" Margin="0,0,0,15" SelectedIndex="1">
-            <ComboBoxItem Content="English"/>
-            <ComboBoxItem Content="Turkish"/>
-            <ComboBoxItem Content="Russian"/>
-            <ComboBoxItem Content="Spanish"/>
-            <ComboBoxItem Content="French"/>
-            <ComboBoxItem Content="Italian"/>
-            <ComboBoxItem Content="German"/>
-        </ComboBox>
+                <!-- Language -->
+                <TextBlock Text="{local:Loc section.language}" Style="{StaticResource SectionTitle}" Margin="0,0,0,14"/>
 
-        <TextBlock Text="Shortcut Key:" Foreground="#AAAAAA" Margin="0,0,0,5"/>
-        <ComboBox x:Name="CmbShortcut" Margin="0,0,0,15" SelectedIndex="0">
-            <ComboBoxItem Content="Ctrl + Alt + X"/>
-            <ComboBoxItem Content="Ctrl + Shift + C"/>
-            <ComboBoxItem Content="Alt + Z"/>
-        </ComboBox>
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="220"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="{local:Loc ui.language.label}" Style="{StaticResource RowLabel}"/>
+                        <TextBlock Text="{local:Loc ui.language.hint}"
+                                   Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <ComboBox x:Name="CmbUiLang" Grid.Column="1" VerticalAlignment="Center"
+                              DisplayMemberPath="Name" SelectedValuePath="Code"/>
+                </Grid>
 
-        <CheckBox x:Name="ChkStartUp" Content="Start with Windows" Foreground="White" Margin="0,0,0,15"/>
+                <Border Style="{StaticResource Divider}" Margin="0,22,0,20"/>
 
-        <TextBlock Text="* Restart the app to apply new shortcut keys." Foreground="#888888" FontSize="11" Margin="0,0,0,10" HorizontalAlignment="Center" FontStyle="Italic"/>
+                <!-- Translation -->
+                <Grid Margin="0,0,0,14">
+                    <TextBlock Text="{local:Loc section.translation}" Style="{StaticResource SectionTitle}" VerticalAlignment="Center"/>
+                    <Button x:Name="BtnSwap" Content="{local:Loc swap}" Style="{StaticResource LinkButton}"
+                            HorizontalAlignment="Right" Click="BtnSwap_Click"/>
+                </Grid>
 
-        <Button Content="Save and Close" Background="#007ACC" Foreground="White" Padding="8" FontWeight="Bold" BorderThickness="0" Cursor="Hand" Click="BtnSave_Click"/>
-    </StackPanel>
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="220"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Center" Margin="0,0,16,0">
+                        <TextBlock Text="{local:Loc engine.label}" Style="{StaticResource RowLabel}"/>
+                        <TextBlock Text="{local:Loc engine.hint}"
+                                   Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <ComboBox x:Name="CmbApi" Grid.Column="1" VerticalAlignment="Center">
+                        <ComboBoxItem Content="Google Translate"/>
+                        <ComboBoxItem Content="Yandex Translate"/>
+                    </ComboBox>
+                </Grid>
+
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="220"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{local:Loc from}" Style="{StaticResource RowLabel}" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="CmbSourceLang" Grid.Column="1" VerticalAlignment="Center"
+                              DisplayMemberPath="Name" SelectedValuePath="Code"/>
+                </Grid>
+
+                <Grid Margin="0,0,0,14">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="220"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Text="{local:Loc to}" Style="{StaticResource RowLabel}" VerticalAlignment="Center"/>
+                    <ComboBox x:Name="CmbTargetLang" Grid.Column="1" VerticalAlignment="Center"
+                              DisplayMemberPath="Name" SelectedValuePath="Code"/>
+                </Grid>
+
+                <CheckBox x:Name="ChkAutoDetect" Style="{StaticResource ToggleSwitch}" Margin="0,0,0,8">
+                    <StackPanel>
+                        <TextBlock Text="{local:Loc auto.label}" Style="{StaticResource RowLabel}"/>
+                        <TextBlock Text="{local:Loc auto.hint}"
+                                   Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </CheckBox>
+
+                <TextBlock x:Name="TxtLangNote" Style="{StaticResource Hint}" Margin="0,4,0,0" Visibility="Collapsed"/>
+
+                <Border Style="{StaticResource Divider}" Margin="0,22,0,20"/>
+
+                <!-- Shortcut -->
+                <TextBlock Text="{local:Loc section.shortcut}" Style="{StaticResource SectionTitle}" Margin="0,0,0,14"/>
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="220"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel VerticalAlignment="Top" Margin="0,0,16,0">
+                        <TextBlock Text="{local:Loc shortcut.label}" Style="{StaticResource RowLabel}" Margin="0,8,0,0"/>
+                        <TextBlock x:Name="TxtHotkeyHint" Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="1">
+                        <Border x:Name="HotkeyBox" Height="34" Background="{StaticResource InputBg}"
+                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1" CornerRadius="6"
+                                Focusable="True" Cursor="Hand" FocusVisualStyle="{x:Null}"
+                                MouseLeftButtonDown="HotkeyBox_MouseLeftButtonDown"
+                                PreviewKeyDown="HotkeyBox_PreviewKeyDown"
+                                GotKeyboardFocus="HotkeyBox_GotKeyboardFocus"
+                                LostKeyboardFocus="HotkeyBox_LostKeyboardFocus">
+                            <TextBlock x:Name="TxtHotkey" VerticalAlignment="Center" Margin="12,0"
+                                       FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
+                        </Border>
+                        <Button Content="{local:Loc shortcut.reset}" Style="{StaticResource LinkButton}"
+                                HorizontalAlignment="Right" Margin="0,6,0,0" Click="BtnResetHotkey_Click"/>
+                    </StackPanel>
+                </Grid>
+
+                <Border Style="{StaticResource Divider}" Margin="0,18,0,20"/>
+
+                <!-- General -->
+                <TextBlock Text="{local:Loc section.general}" Style="{StaticResource SectionTitle}" Margin="0,0,0,14"/>
+
+                <CheckBox x:Name="ChkStartUp" Style="{StaticResource ToggleSwitch}">
+                    <StackPanel>
+                        <TextBlock Text="{local:Loc startup.label}" Style="{StaticResource RowLabel}"/>
+                        <TextBlock Text="{local:Loc startup.hint}"
+                                   Style="{StaticResource Hint}" Margin="0,2,0,0"/>
+                    </StackPanel>
+                </CheckBox>
+            </StackPanel>
+        </ScrollViewer>
+
+        <Border Grid.Row="1" Background="{StaticResource FooterBg}" BorderBrush="{StaticResource LineBrush}"
+                BorderThickness="0,1,0,0" Padding="28,16">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="TxtError" Foreground="{StaticResource Danger}" FontSize="12" TextWrapping="Wrap"
+                           VerticalAlignment="Center" Margin="0,0,16,0" Visibility="Collapsed"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal">
+                    <Button Content="{local:Loc btn.cancel}" Style="{StaticResource SecondaryButton}" IsCancel="True" Margin="0,0,10,0"/>
+                    <Button Content="{local:Loc btn.save}" Style="{StaticResource PrimaryButton}" IsDefault="True" Click="BtnSave_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
 </Window>

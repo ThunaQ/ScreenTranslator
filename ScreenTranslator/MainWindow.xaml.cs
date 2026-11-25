@@ -1,215 +1,350 @@
-﻿using Microsoft.Win32;
+﻿#nullable disable
 using System;
 using System.Diagnostics;
-using System.Drawing;
-using System.IO;
-using System.Runtime.InteropServices;
-using System.Text.Json;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
-using System.Windows.Media;
-using Cursors = System.Windows.Input.Cursors;
-using HorizontalAlignment = System.Windows.HorizontalAlignment;
+using System.Windows.Media.Imaging;
+using DrawingBitmap = System.Drawing.Bitmap;
+using DrawingRectangle = System.Drawing.Rectangle;
+using KeyEventArgs = System.Windows.Input.KeyEventArgs;
 using MouseEventArgs = System.Windows.Input.MouseEventArgs;
+using Point = System.Windows.Point;
 
 namespace ScreenTranslator
 {
     public partial class MainWindow : Window
     {
-        [DllImport("user32.dll")]
-        private static extern bool RegisterHotKey(IntPtr hWnd, int id, uint fsModifiers, uint vk);
-
-        [DllImport("user32.dll")]
-        private static extern bool UnregisterHotKey(IntPtr hWnd, int id);
-
-        private const int HOTKEY_ID = 9000;
-        private const uint MOD_ALT = 0x0001;
-        private const uint MOD_CTRL = 0x0002;
-        private const uint MOD_SHIFT = 0x0004;
-        private const uint VK_X = 0x58;
-        private const uint VK_C = 0x43;
-        private const uint VK_Z = 0x5A;
-
-        private System.Windows.Forms.NotifyIcon trayIcon;
-        private System.Windows.Point startPoint;
-        private bool isDrawing = false;
+        private const int HotkeyId = 9000;
 
         private readonly TranslationService translationService = new TranslationService();
-        private Window currentTranslationWindow;
+        private readonly bool needsFirstRunSetup;
+
+        private System.Windows.Forms.NotifyIcon trayIcon;
+        private IntPtr windowHandle = IntPtr.Zero;
+        private bool hotkeyRegistered;
+
+        private DrawingBitmap frozenScreen;
+        private bool overlayActive;
+        private bool isDrawing;
+        private bool startingCapture;
+        private DateTime overlayShownAt = DateTime.MinValue;
+        private Point startPoint;
+
+        private ResultPopup popup;
+        private SettingsWindow settingsWindow;
+        private HistoryWindow historyWindow;
+        private int requestCounter;
 
         public MainWindow()
         {
+            // Settings must be loaded before the hotkey is registered (OnSourceInitialized runs later).
+            needsFirstRunSetup = !AppSettings.Load();
+
             InitializeComponent();
             InitializeTrayIcon();
+
+            // The tray menu is built in code, so it rebuilds itself when the interface language changes.
+            Loc.LanguageChanged += BuildTrayMenu;
         }
+
+        // ------------------------------------------------------------------
+        // Tray icon and windows
+        // ------------------------------------------------------------------
 
         private void InitializeTrayIcon()
         {
-            trayIcon = new System.Windows.Forms.NotifyIcon
+            System.Drawing.Icon icon;
+            try
             {
-                Icon = System.Drawing.Icon.ExtractAssociatedIcon(System.Reflection.Assembly.GetExecutingAssembly().Location),
-                Text = "ScreenTranslator - Running in background",
-                Visible = true
-            };
-
-            var contextMenu = new System.Windows.Forms.ContextMenuStrip();
-
-            var settingsItem = new System.Windows.Forms.ToolStripMenuItem("Settings");
-            settingsItem.Click += (s, args) =>
+                string exePath = Process.GetCurrentProcess().MainModule?.FileName;
+                icon = exePath != null
+                    ? System.Drawing.Icon.ExtractAssociatedIcon(exePath)
+                    : System.Drawing.SystemIcons.Application;
+            }
+            catch
             {
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                {
-                    var settingsWindow = new SettingsWindow { Topmost = true };
-                    settingsWindow.ShowDialog();
-                });
-            };
+                icon = System.Drawing.SystemIcons.Application;
+            }
 
-            var historyItem = new System.Windows.Forms.ToolStripMenuItem("History");
-            historyItem.Click += (s, args) =>
-            {
-                System.Windows.Application.Current.Dispatcher.Invoke(() =>
-                {
-                    var historyWindow = new HistoryWindow { Topmost = true };
-                    historyWindow.Show();
-                });
-            };
+            trayIcon = new System.Windows.Forms.NotifyIcon { Icon = icon, Visible = true };
+            trayIcon.DoubleClick += (s, e) => _ = BeginCaptureAsync(250);
 
-            var exitItem = new System.Windows.Forms.ToolStripMenuItem("Exit");
-            exitItem.Click += (s, args) => System.Windows.Application.Current.Shutdown();
-
-            contextMenu.Items.Add(settingsItem);
-            contextMenu.Items.Add(historyItem);
-            contextMenu.Items.Add(exitItem);
-            trayIcon.ContextMenuStrip = contextMenu;
+            BuildTrayMenu();
+            UpdateTrayText();
         }
 
-        public static class AppSettings
+        /// <summary>(Re)creates the tray menu so its texts follow the interface language.</summary>
+        private void BuildTrayMenu()
         {
-            public static string SelectedApi = "Google";
-            public static string SourceLang = "en";
-            public static string TargetLang = "tr";
-            public static string TessLang = "eng";
-            public static int ShortcutSelection = 0;
-            public static bool AutoStart = false;
-            public static bool AutoDetectSource = false;
+            var menu = new System.Windows.Forms.ContextMenuStrip();
+            menu.Items.Add(Loc.T("tray.translate"), null, (s, e) => _ = BeginCaptureAsync(250));
+            menu.Items.Add(Loc.T("tray.history"), null, (s, e) => OpenHistory());
+            menu.Items.Add(Loc.T("tray.settings"), null, (s, e) => OpenSettings());
+            menu.Items.Add(new System.Windows.Forms.ToolStripSeparator());
+            menu.Items.Add(Loc.T("tray.exit"), null, (s, e) => System.Windows.Application.Current.Shutdown());
 
-            private const string RunKeyPath = "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Run";
-            private const string AppRegistryName = "ScreenTranslator";
-            private static readonly string SettingsFilePath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "settings.json");
+            System.Windows.Forms.ContextMenuStrip old = trayIcon.ContextMenuStrip;
+            trayIcon.ContextMenuStrip = menu;
+            old?.Dispose();
+        }
 
-            public static void Save()
+        private void UpdateTrayText()
+        {
+            if (trayIcon != null)
+                trayIcon.Text = "ScreenTranslator (" + AppSettings.HotkeyDisplay + ")";
+        }
+
+        private void OpenSettings()
+        {
+            if (settingsWindow != null)
             {
-                var settings = new { SelectedApi, SourceLang, TargetLang, TessLang, ShortcutSelection, AutoStart, AutoDetectSource };
-                File.WriteAllText(SettingsFilePath, JsonSerializer.Serialize(settings));
-
-                using (RegistryKey key = Registry.CurrentUser.OpenSubKey(RunKeyPath, true))
-                {
-                    if (key != null)
-                    {
-                        if (AutoStart)
-                            key.SetValue(AppRegistryName, Process.GetCurrentProcess().MainModule.FileName);
-                        else
-                            key.DeleteValue(AppRegistryName, false);
-                    }
-                }
+                settingsWindow.Activate();
+                return;
             }
 
-            public static bool Load()
-            {
-                if (!File.Exists(SettingsFilePath))
-                    return false;
+            if (overlayActive)
+                HideOverlay();
 
-                string json = File.ReadAllText(SettingsFilePath);
-                using (JsonDocument doc = JsonDocument.Parse(json))
-                {
-                    var root = doc.RootElement;
-                    if (root.TryGetProperty("SelectedApi", out var p)) SelectedApi = p.GetString();
-                    if (root.TryGetProperty("SourceLang", out p)) SourceLang = p.GetString();
-                    if (root.TryGetProperty("TargetLang", out p)) TargetLang = p.GetString();
-                    if (root.TryGetProperty("TessLang", out p)) TessLang = p.GetString();
-                    if (root.TryGetProperty("ShortcutSelection", out p)) ShortcutSelection = p.GetInt32();
-                    if (root.TryGetProperty("AutoStart", out p)) AutoStart = p.GetBoolean();
-                    if (root.TryGetProperty("AutoDetectSource", out p)) AutoDetectSource = p.GetBoolean();
-                }
-                return true;
+            settingsWindow = new SettingsWindow { Topmost = true };
+            bool? saved = settingsWindow.ShowDialog();
+            settingsWindow = null;
+
+            // A modal dialog can leave this hidden window disabled; the overlay needs it enabled.
+            IsEnabled = true;
+
+            if (saved == true)
+            {
+                RegisterHotkey();
+                UpdateTrayText();
             }
+        }
+
+        private void OpenHistory()
+        {
+            if (historyWindow != null)
+            {
+                historyWindow.Activate();
+                return;
+            }
+
+            historyWindow = new HistoryWindow { Topmost = true };
+            historyWindow.Closed += (s, e) => historyWindow = null;
+            historyWindow.Show();
         }
 
         private void Window_Loaded(object sender, RoutedEventArgs e)
         {
-            this.Hide();
-            bool alreadyOpened = AppSettings.Load();
+            Hide();
 
-            if (!alreadyOpened)
-            {
-                System.Windows.Application.Current.Dispatcher.InvokeAsync(() =>
-                {
-                    var settingsWindow = new SettingsWindow { Topmost = true };
-                    settingsWindow.ShowDialog();
-                });
-            }
+            if (needsFirstRunSetup)
+                Dispatcher.BeginInvoke(new Action(OpenSettings));
         }
+
+        // ------------------------------------------------------------------
+        // Global hotkey
+        // ------------------------------------------------------------------
 
         protected override void OnSourceInitialized(EventArgs e)
         {
             base.OnSourceInitialized(e);
-            IntPtr handle = new WindowInteropHelper(this).Handle;
 
-            uint fsModifiers = MOD_CTRL | MOD_ALT;
-            uint vk = VK_X;
+            windowHandle = new WindowInteropHelper(this).Handle;
+            HwndSource.FromHwnd(windowHandle)?.AddHook(HwndHook);
 
-            if (AppSettings.ShortcutSelection == 1)
-            {
-                fsModifiers = MOD_CTRL | MOD_SHIFT;
-                vk = VK_C;
-            }
-            else if (AppSettings.ShortcutSelection == 2)
-            {
-                fsModifiers = MOD_ALT;
-                vk = VK_Z;
-            }
+            RegisterHotkey();
+        }
 
-            bool registered = RegisterHotKey(handle, HOTKEY_ID, fsModifiers, vk);
-            if (!registered)
+        private bool RegisterHotkey()
+        {
+            if (windowHandle == IntPtr.Zero)
+                return false;
+
+            if (hotkeyRegistered)
             {
-                System.Windows.MessageBox.Show(
-                    "Could not register the shortcut key. It may already be in use by another application. Please pick a different shortcut in Settings.",
-                    "ScreenTranslator", MessageBoxButton.OK, MessageBoxImage.Warning);
+                NativeMethods.UnregisterHotKey(windowHandle, HotkeyId);
+                hotkeyRegistered = false;
             }
 
-            HwndSource source = HwndSource.FromHwnd(handle);
-            source.AddHook(HwndHook);
+            hotkeyRegistered = NativeMethods.RegisterHotKey(
+                windowHandle, HotkeyId, AppSettings.HotkeyModifiers | NativeMethods.ModNoRepeat, AppSettings.HotkeyKey);
+
+            AppLog.Write("Hotkey " + AppSettings.HotkeyDisplay + " registered: " + hotkeyRegistered);
+
+            if (!hotkeyRegistered)
+            {
+                trayIcon?.ShowBalloonTip(5000, "ScreenTranslator",
+                    Loc.T("balloon.hotkeyused", AppSettings.HotkeyDisplay),
+                    System.Windows.Forms.ToolTipIcon.Warning);
+            }
+
+            return hotkeyRegistered;
         }
 
         private IntPtr HwndHook(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
         {
             const int WM_HOTKEY = 0x0312;
 
-            if (msg == WM_HOTKEY && wParam.ToInt32() == HOTKEY_ID)
+            if (msg == WM_HOTKEY && wParam.ToInt32() == HotkeyId)
             {
-                this.Show();
-                this.WindowState = WindowState.Normal;
-                this.WindowState = WindowState.Maximized;
-                this.Activate();
-                this.Focus();
-                SelectionBox.Visibility = Visibility.Collapsed;
                 handled = true;
+                AppLog.Write("Hotkey pressed");
+                _ = BeginCaptureAsync();
             }
+
             return IntPtr.Zero;
+        }
+
+        // ------------------------------------------------------------------
+        // Capture overlay
+        // ------------------------------------------------------------------
+
+        private async Task BeginCaptureAsync(int initialDelayMs = 0)
+        {
+            if (settingsWindow != null || startingCapture)
+                return; // the modal settings dialog would block the overlay
+
+            if (overlayActive)
+            {
+                HideOverlay(); // pressing the shortcut again cancels
+                return;
+            }
+
+            startingCapture = true;
+            requestCounter++; // invalidates any translation still in flight
+
+            try
+            {
+                bool hadPopup = popup != null;
+                ClosePopup();
+
+                int delay = Math.Max(initialDelayMs, hadPopup ? 80 : 0);
+                if (delay > 0)
+                    await Task.Delay(delay); // let the previous popup / tray menu disappear from the screen
+
+                frozenScreen?.Dispose();
+                frozenScreen = CaptureVirtualScreen();
+                ShowOverlay();
+                AppLog.Write("Overlay shown");
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Could not start capture: " + ex);
+                HideOverlay();
+
+                trayIcon?.ShowBalloonTip(5000, "ScreenTranslator",
+                    Loc.T("err.capture") + " (" + ex.GetType().Name + ")",
+                    System.Windows.Forms.ToolTipIcon.Error);
+            }
+            finally
+            {
+                startingCapture = false;
+            }
+        }
+
+        private static DrawingBitmap CaptureVirtualScreen()
+        {
+            System.Drawing.Rectangle bounds = System.Windows.Forms.SystemInformation.VirtualScreen;
+            var bitmap = new DrawingBitmap(bounds.Width, bounds.Height, System.Drawing.Imaging.PixelFormat.Format24bppRgb);
+
+            using (var g = System.Drawing.Graphics.FromImage(bitmap))
+            {
+                // Plain copy on purpose: combining CaptureBlt with SourceCopy makes CopyFromScreen throw on some setups.
+                g.CopyFromScreen(bounds.Left, bounds.Top, 0, 0, bounds.Size);
+            }
+
+            return bitmap;
+        }
+
+        private static BitmapSource ToBitmapSource(DrawingBitmap bitmap)
+        {
+            IntPtr hBitmap = bitmap.GetHbitmap();
+            try
+            {
+                BitmapSource source = Imaging.CreateBitmapSourceFromHBitmap(
+                    hBitmap, IntPtr.Zero, Int32Rect.Empty, BitmapSizeOptions.FromEmptyOptions());
+                source.Freeze();
+                return source;
+            }
+            finally
+            {
+                NativeMethods.DeleteObject(hBitmap);
+            }
+        }
+
+        private void ShowOverlay()
+        {
+            IsEnabled = true;
+
+            // One window spanning every monitor.
+            WindowState = WindowState.Normal;
+            Left = SystemParameters.VirtualScreenLeft;
+            Top = SystemParameters.VirtualScreenTop;
+            Width = SystemParameters.VirtualScreenWidth;
+            Height = SystemParameters.VirtualScreenHeight;
+
+            FrozenImage.Source = ToBitmapSource(frozenScreen);
+            SelectionBox.Visibility = Visibility.Collapsed;
+            DimHole.Rect = new Rect(0, 0, 0, 0);
+            HintPill.Visibility = Visibility.Visible;
+            isDrawing = false;
+            overlayActive = true;
+            overlayShownAt = DateTime.UtcNow;
+
+            Show();
+            Activate();
+            Focus();
+        }
+
+        private void HideOverlay()
+        {
+            overlayActive = false;
+            isDrawing = false;
+
+            if (CanvasArea.IsMouseCaptured)
+                CanvasArea.ReleaseMouseCapture();
+
+            Hide();
+            FrozenImage.Source = null;
+
+            frozenScreen?.Dispose();
+            frozenScreen = null;
+        }
+
+        private void CanvasArea_SizeChanged(object sender, SizeChangedEventArgs e)
+        {
+            DimFull.Rect = new Rect(0, 0, e.NewSize.Width, e.NewSize.Height);
+        }
+
+        private void Window_KeyDown(object sender, KeyEventArgs e)
+        {
+            if (e.Key == Key.Escape && overlayActive)
+                HideOverlay();
+        }
+
+        private void Window_Deactivated(object sender, EventArgs e)
+        {
+            // Alt+Tab or a notification stole focus: don't leave a frozen screen lying around.
+            // Ignore the first moments after showing, when Windows may still be shuffling activation.
+            if (overlayActive && !isDrawing && (DateTime.UtcNow - overlayShownAt).TotalMilliseconds > 600)
+                HideOverlay();
+        }
+
+        private void CanvasArea_MouseRightButtonDown(object sender, MouseButtonEventArgs e)
+        {
+            if (overlayActive)
+                HideOverlay();
         }
 
         private void CanvasArea_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
         {
             isDrawing = true;
             startPoint = e.GetPosition(CanvasArea);
+            HintPill.Visibility = Visibility.Collapsed;
 
-            Canvas.SetLeft(SelectionBox, startPoint.X);
-            Canvas.SetTop(SelectionBox, startPoint.Y);
-            SelectionBox.Width = 0;
-            SelectionBox.Height = 0;
+            UpdateSelection(startPoint, startPoint);
             SelectionBox.Visibility = Visibility.Visible;
 
             CanvasArea.CaptureMouse();
@@ -217,212 +352,153 @@ namespace ScreenTranslator
 
         private void CanvasArea_MouseMove(object sender, MouseEventArgs e)
         {
-            if (!isDrawing) return;
+            if (!isDrawing)
+                return;
 
-            System.Windows.Point currentPoint = e.GetPosition(CanvasArea);
+            UpdateSelection(startPoint, e.GetPosition(CanvasArea));
+        }
 
-            double x = Math.Min(currentPoint.X, startPoint.X);
-            double y = Math.Min(currentPoint.Y, startPoint.Y);
-            double width = Math.Max(currentPoint.X, startPoint.X) - x;
-            double height = Math.Max(currentPoint.Y, startPoint.Y) - y;
+        private void UpdateSelection(Point a, Point b)
+        {
+            double x = Math.Min(a.X, b.X);
+            double y = Math.Min(a.Y, b.Y);
+            double width = Math.Abs(a.X - b.X);
+            double height = Math.Abs(a.Y - b.Y);
 
             Canvas.SetLeft(SelectionBox, x);
             Canvas.SetTop(SelectionBox, y);
             SelectionBox.Width = width;
             SelectionBox.Height = height;
+            DimHole.Rect = new Rect(x, y, width, height);
         }
 
-        private async void CanvasArea_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+        private void CanvasArea_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
         {
+            if (!isDrawing)
+                return;
+
             isDrawing = false;
             CanvasArea.ReleaseMouseCapture();
 
-            System.Windows.Point releasePoint = e.GetPosition(CanvasArea);
+            double x = Canvas.GetLeft(SelectionBox);
+            double y = Canvas.GetTop(SelectionBox);
+            double width = SelectionBox.Width;
+            double height = SelectionBox.Height;
 
-            double wpfX = Canvas.GetLeft(SelectionBox);
-            double wpfY = Canvas.GetTop(SelectionBox);
-            double wpfWidth = SelectionBox.Width;
-            double wpfHeight = SelectionBox.Height;
-
-            if (wpfWidth <= 5 || wpfHeight <= 5)
+            if (width < 8 || height < 8)
             {
-                this.Hide();
+                HideOverlay(); // a click or a tiny drag cancels
                 return;
             }
 
-            System.Windows.Point topLeft = CanvasArea.PointToScreen(new System.Windows.Point(wpfX, wpfY));
-            System.Windows.Point bottomRight = CanvasArea.PointToScreen(new System.Windows.Point(wpfX + wpfWidth, wpfY + wpfHeight));
+            DrawingBitmap crop = CropFrozen(x, y, width, height);
+            Rect anchor = new Rect(Left + x, Top + y, width, height); // selection in screen DIPs
 
-            this.Hide();
+            HideOverlay();
 
-            int realX = (int)topLeft.X;
-            int realY = (int)topLeft.Y;
-            int realWidth = (int)(bottomRight.X - topLeft.X);
-            int realHeight = (int)(bottomRight.Y - topLeft.Y);
+            if (crop != null)
+                _ = ProcessCaptureAsync(crop, anchor);
+        }
 
-            using (Bitmap bmp = new Bitmap(realWidth, realHeight))
+        private DrawingBitmap CropFrozen(double x, double y, double width, double height)
+        {
+            if (frozenScreen == null || CanvasArea.ActualWidth <= 0 || CanvasArea.ActualHeight <= 0)
+                return null;
+
+            // Map canvas DIPs to bitmap pixels; correct at any DPI scale.
+            double scaleX = frozenScreen.Width / CanvasArea.ActualWidth;
+            double scaleY = frozenScreen.Height / CanvasArea.ActualHeight;
+
+            var wanted = new DrawingRectangle(
+                (int)Math.Floor(x * scaleX), (int)Math.Floor(y * scaleY),
+                (int)Math.Ceiling(width * scaleX), (int)Math.Ceiling(height * scaleY));
+
+            DrawingRectangle area = DrawingRectangle.Intersect(
+                new DrawingRectangle(0, 0, frozenScreen.Width, frozenScreen.Height), wanted);
+
+            if (area.Width < 4 || area.Height < 4)
+                return null;
+
+            return frozenScreen.Clone(area, frozenScreen.PixelFormat);
+        }
+
+        // ------------------------------------------------------------------
+        // Translation
+        // ------------------------------------------------------------------
+
+        private async Task ProcessCaptureAsync(DrawingBitmap crop, Rect anchor)
+        {
+            int requestId = ++requestCounter;
+            ShowPopup(PopupKind.Loading, Loc.T("popup.translating"), anchor);
+
+            try
             {
-                using (Graphics g = Graphics.FromImage(bmp))
-                {
-                    g.CopyFromScreen(realX, realY, 0, 0, bmp.Size);
-                }
-
-                try
+                using (crop)
                 {
                     TranslationResult result = await translationService.TranslateCaptureAsync(
-                        bmp, AppSettings.SourceLang, AppSettings.TargetLang, AppSettings.TessLang,
+                        crop, AppSettings.SourceLang, AppSettings.TargetLang, AppSettings.TessLang,
                         AppSettings.SelectedApi, AppSettings.AutoDetectSource);
 
-                    Debug.WriteLine($"[ScreenTranslator] OCR output -> \"{result.ExtractedText.Replace("\n", " | ")}\"");
+                    if (requestId != requestCounter)
+                        return; // a newer capture replaced this one
 
-                    if (!result.HasContent)
+                    AppLog.Write(result.Status + " via " + result.EngineUsed + " | OCR: " + result.ExtractedText.Replace("\n", " | "));
+
+                    if (result.HasContent)
                     {
-                        await FlashFailureAsync(releasePoint.X, releasePoint.Y);
-                        return;
+                        TranslationHistory.Add(result.ExtractedText, result.TranslatedText);
+                        ShowPopup(PopupKind.Result, result.TranslatedText, anchor);
                     }
+                    else
+                    {
+                        ShowPopup(PopupKind.Error, result.Message, anchor);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                AppLog.Write("Capture/translate failed: " + ex);
 
-                    TranslationHistory.Add(result.ExtractedText, result.TranslatedText);
-
-                    ShowElegantTranslationBox(result.TranslatedText, wpfX, wpfY + wpfHeight + 10, wpfWidth);
-                }
-                catch (System.Net.Http.HttpRequestException httpEx)
-                {
-                    Debug.WriteLine($"[ScreenTranslator] Translation API request failed: {httpEx.Message}. " +
-                        "If this says 429 (Too Many Requests), the free translation endpoint is rate-limiting you — wait a bit or switch API in Settings.");
-                    await FlashFailureAsync(releasePoint.X, releasePoint.Y);
-                }
-                catch (Exception ex)
-                {
-                    Debug.WriteLine($"[ScreenTranslator] Capture/translate failed: {ex}");
-                    await FlashFailureAsync(releasePoint.X, releasePoint.Y);
-                }
+                if (requestId == requestCounter)
+                    ShowPopup(PopupKind.Error, Loc.T("err.generic"), anchor);
             }
         }
 
-        private async Task FlashFailureAsync(double centerX, double centerY)
+        private void ShowPopup(PopupKind kind, string text, Rect anchor)
         {
-            SelectionBox.Visibility = Visibility.Collapsed;
+            if (popup == null)
+            {
+                popup = new ResultPopup();
+                popup.Closed += (s, e) =>
+                {
+                    if (ReferenceEquals(s, popup))
+                        popup = null;
+                };
+            }
 
-            double markSize = ErrorMark.Width;
-            Canvas.SetLeft(ErrorMark, centerX - markSize / 2);
-            Canvas.SetTop(ErrorMark, centerY - markSize / 2);
-            ErrorMark.Visibility = Visibility.Visible;
-
-            System.Windows.Media.Brush originalBackground = this.Background;
-            this.Background = System.Windows.Media.Brushes.Transparent;
-            this.Show();
-
-            await Task.Delay(350);
-
-            this.Hide();
-            ErrorMark.Visibility = Visibility.Collapsed;
-            this.Background = originalBackground;
+            popup.Present(kind, text, anchor);
         }
 
-        private void ShowElegantTranslationBox(string translation, double leftX, double topY, double boxWidth)
+        private void ClosePopup()
         {
-            currentTranslationWindow?.Close();
-
-            var translationWindow = new Window
-            {
-                WindowStyle = WindowStyle.None,
-                AllowsTransparency = true,
-                Background = System.Windows.Media.Brushes.Transparent,
-                Topmost = true,
-                ShowInTaskbar = false,
-                SizeToContent = SizeToContent.Height,
-                Width = Math.Max(250, boxWidth),
-                Left = leftX,
-                Top = topY
-            };
-
-            var frame = new Border
-            {
-                Background = new SolidColorBrush(System.Windows.Media.Color.FromArgb(240, 25, 25, 25)),
-                CornerRadius = new CornerRadius(8),
-                BorderBrush = new SolidColorBrush(System.Windows.Media.Color.FromArgb(255, 60, 60, 60)),
-                BorderThickness = new Thickness(1),
-                Cursor = Cursors.Hand
-            };
-
-            frame.MouseLeftButtonDown += (s, e) => translationWindow.DragMove();
-
-            var mainGrid = new Grid();
-
-            var btnCopy = new TextBlock
-            {
-                Text = "⧉",
-                Foreground = System.Windows.Media.Brushes.Gray,
-                FontSize = 14,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 5, 30, 0),
-                Cursor = Cursors.Hand,
-                ToolTip = "Copy translation"
-            };
-            btnCopy.MouseEnter += (s, e) => btnCopy.Foreground = System.Windows.Media.Brushes.White;
-            btnCopy.MouseLeave += (s, e) => btnCopy.Foreground = System.Windows.Media.Brushes.Gray;
-            btnCopy.MouseDown += (s, e) =>
-            {
-                e.Handled = true;
-                try { System.Windows.Clipboard.SetText(translation); } catch { }
-            };
-
-            var btnClose = new TextBlock
-            {
-                Text = "✕",
-                Foreground = System.Windows.Media.Brushes.Gray,
-                FontSize = 14,
-                FontWeight = FontWeights.Bold,
-                HorizontalAlignment = HorizontalAlignment.Right,
-                VerticalAlignment = VerticalAlignment.Top,
-                Margin = new Thickness(0, 5, 8, 0),
-                Cursor = Cursors.Arrow
-            };
-            btnClose.MouseEnter += (s, e) => btnClose.Foreground = System.Windows.Media.Brushes.Red;
-            btnClose.MouseLeave += (s, e) => btnClose.Foreground = System.Windows.Media.Brushes.Gray;
-            btnClose.MouseDown += (s, e) => translationWindow.Close();
-
-            var txtTranslation = new TextBlock
-            {
-                Text = translation.Trim(),
-                Foreground = System.Windows.Media.Brushes.White,
-                FontSize = 16,
-                FontWeight = FontWeights.Medium,
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(15, 20, 15, 15)
-            };
-
-            mainGrid.Children.Add(txtTranslation);
-            mainGrid.Children.Add(btnCopy);
-            mainGrid.Children.Add(btnClose);
-
-            frame.Child = mainGrid;
-            translationWindow.Content = frame;
-
-            translationWindow.Loaded += (s, e) =>
-            {
-                if (translationWindow.Left + translationWindow.ActualWidth > SystemParameters.PrimaryScreenWidth)
-                    translationWindow.Left = SystemParameters.PrimaryScreenWidth - translationWindow.ActualWidth - 10;
-                if (translationWindow.Top + translationWindow.ActualHeight > SystemParameters.PrimaryScreenHeight)
-                    translationWindow.Top = SystemParameters.PrimaryScreenHeight - translationWindow.ActualHeight - 10;
-            };
-
-            translationWindow.Closed += (s, e) =>
-            {
-                if (currentTranslationWindow == translationWindow)
-                    currentTranslationWindow = null;
-            };
-
-            currentTranslationWindow = translationWindow;
-            translationWindow.Show();
+            ResultPopup old = popup;
+            popup = null;
+            old?.Close();
         }
+
+        // ------------------------------------------------------------------
+        // Shutdown
+        // ------------------------------------------------------------------
 
         protected override void OnClosed(EventArgs e)
         {
-            IntPtr handle = new WindowInteropHelper(this).Handle;
-            UnregisterHotKey(handle, HOTKEY_ID);
+            Loc.LanguageChanged -= BuildTrayMenu;
 
+            if (hotkeyRegistered)
+                NativeMethods.UnregisterHotKey(windowHandle, HotkeyId);
+
+            frozenScreen?.Dispose();
+            popup?.Close();
             translationService.Dispose();
 
             if (trayIcon != null)
